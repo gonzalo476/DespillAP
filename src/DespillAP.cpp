@@ -1,6 +1,8 @@
 
 #include "include/DespillAP.h"
 
+#include <cstdio>
+
 #include "include/Color.h"
 #include "include/Constants.h"
 
@@ -276,8 +278,13 @@ void DespillAPIop::set_input(int i, Op *inputOp, int input, int offset)
 
 void DespillAPIop::_validate(bool for_real)
 {
+  printf("DESPILL: Entering _validate\n");
+  fflush(stdout);
   // copy image info
   copy_info(0);
+
+  printf("DESPILL: After copy_info\n");
+  fflush(stdout);
 
   // setup output channels:
   // include all requested channels plus our spill output channel
@@ -336,6 +343,9 @@ void DespillAPIop::_validate(bool for_real)
     // this allows user to fine-tune the calculated shift
     _hueShift = k_hueOffset - _autoShift;
   }
+
+  printf("DESPILL: Exiting _validate\n");
+  fflush(stdout);
 }
 
 void DespillAPIop::_request(int x, int y, int r, int t, ChannelMask channels, int count)
@@ -345,23 +355,23 @@ void DespillAPIop::_request(int x, int y, int r, int t, ChannelMask channels, in
   requestedChannels += Mask_RGB;
 
   // request data fron input 'Source'
-  input(inputSource)->request(input(inputSource)->info().box(), requestedChannels, Mask_RGB);
+  input(0)->request(x, y, r, t, requestedChannels, count);
 
   // request limit matte if its connected to input 'Limit'
   // take only what fits from the Op format, based on the input limit.
   if(input(inputLimit) != nullptr) {
-    input(inputLimit)->request(input(inputLimit)->info().format(), Mask_All, count);
-  };
+    input(inputLimit)->request(x, y, r, t, Mask_All, count);
+  }
 
   // request color reference if its connected to input 'Color'
   if(input(inputColor) != nullptr) {
-    input(inputColor)->request(input(inputColor)->info().box(), Mask_RGB, count);
-  };
+    input(inputColor)->request(x, y, r, t, Mask_RGB, count);
+  }
 
   // request respill color if its connected to input 'Respill'
   if(input(inputRespill) != nullptr) {
-    input(inputRespill)->request(input(inputRespill)->info().box(), Mask_RGB, count);
-  };
+    input(inputRespill)->request(x, y, r, t, Mask_RGB, count);
+  }
 }
 
 void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
@@ -373,12 +383,12 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
 void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &row)
 {
   // get main input data
-  nuke::ChannelSet requestedChannels = channels;
-  requestedChannels += Mask_RGBA;  // Add RGBA
+  ChannelSet requestedChannels = channels;
+  requestedChannels += Mask_RGB;  // Add RGB
   row.get(input0(), y, x, r, requestedChannels);
 
   // copy all non rgb channels
-  nuke::ChannelSet copyMask = channels - nuke::Mask_RGB;
+  ChannelSet copyMask = channels - Mask_RGB - k_outputSpillChannel;
   row.pre_copy(row, copyMask);
   row.copy(row, copyMask, x, r);
 
@@ -437,7 +447,7 @@ void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &ro
 
   // set pixel pointers to point to RGB channels
   for(int i = 0; i < 3; ++i) {
-    auto chan = static_cast<nuke::Channel>(i + 1);
+    auto chan = static_cast<Channel>(i + 1);
     inPtr[i] = row[chan] + x;
     outPtr[i] = row.writable(chan) + x;
     colorPtr[i] = color_row[chan] + x;
@@ -585,10 +595,9 @@ void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &ro
     }
 
     // write alpha channel to specified output channel
-    foreach(z, channels) {
-      if(z == k_outputSpillChannel) {
-        *(row.writable(z) + x0) = clamp(spillMatte, 0.0f, 1.0f);  // output spill alpha
-      }
+    // if 'channels' contains 'k_outputSpillChannel' or the selected output channel
+    if(channels & k_outputSpillChannel) {
+      *(row.writable(k_outputSpillChannel) + x0) = clamp(spillMatte, 0.0f, 1.0f);
     }
 
     // write RGB channels to output
