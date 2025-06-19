@@ -46,6 +46,9 @@ class DespillAPIop : public Iop
   // constructor
   DespillAPIop(Node *node);
 
+  // destructor
+  ~DespillAPIop() {}
+
   int minimum_inputs() const { return 4; }
   int maximum_inputs() const { return 4; }
 
