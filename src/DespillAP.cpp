@@ -1,8 +1,6 @@
 
 #include "include/DespillAP.h"
 
-#include <cstdio>
-
 #include "include/Color.h"
 #include "include/Constants.h"
 
@@ -278,13 +276,7 @@ void DespillAPIop::set_input(int i, Op *inputOp, int input, int offset)
 
 void DespillAPIop::_validate(bool for_real)
 {
-  printf("DESPILL: Entering _validate\n");
-  fflush(stdout);
-  // copy image info
   copy_info(0);
-
-  printf("DESPILL: After copy_info\n");
-  fflush(stdout);
 
   // setup output channels:
   // include all requested channels plus our spill output channel
@@ -343,9 +335,6 @@ void DespillAPIop::_validate(bool for_real)
     // this allows user to fine-tune the calculated shift
     _hueShift = k_hueOffset - _autoShift;
   }
-
-  printf("DESPILL: Exiting _validate\n");
-  fflush(stdout);
 }
 
 void DespillAPIop::_request(int x, int y, int r, int t, ChannelMask channels, int count)
