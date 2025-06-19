@@ -11,7 +11,7 @@ version: "3"
 
 vars:
   PROJECT_NAME: DespillAP
-  VERSION: v1.0.0
+  VERSION: v1.0.1
   # nuke versions to build-all
   NUKE_VERSIONS: 12.1,12.2,13.0,13.1,13.2,14.0,14.1,15.0
   OUTPUT_DIR: artifacts
