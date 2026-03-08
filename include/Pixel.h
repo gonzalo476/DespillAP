@@ -374,7 +374,7 @@ namespace pixel
      * @param index Zero-based channel index (registration order)
      * @param value Value to write
      */
-    void set(int index, float value) noexcept
+    void write(int index, float value) noexcept
     {
       assert(index >= 0 && index < count_);
       *ptrs_[index] = value;
