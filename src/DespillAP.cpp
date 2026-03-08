@@ -1,4 +1,3 @@
-
 #include "DespillAP.h"
 
 #include "Color.h"
@@ -42,6 +41,8 @@ DespillAPIop::DespillAPIop(Node *node) : Iop(node)
   k_invertLimitMask = 1;
   k_blackPoint = 0.0f;
   k_whitePoint = 1.0f;
+  k_protectTones = false;
+  k_protectPrev = false;
 
   isSourceConnected = false;
   isLimitConnected = false;
@@ -53,7 +54,6 @@ DespillAPIop::DespillAPIop(Node *node) : Iop(node)
 
 void DespillAPIop::knobs(Knob_Callback f)
 {
-  Divider(f);
   Enumeration_knob(f, &k_colorType, Constants::COLOR_TYPES, "color");
   Tooltip(f,
           "Select spill color: Red, Green, Blue channels, or use Color Picker. Disabled when Color "
@@ -556,263 +556,8 @@ void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &ro
   }
 }
 
-// gpu
-const char *DespillAPIop::gpuEngine_decl() const
-{
-  return "uniform float $$hueShift;      \n"
-         "uniform float $$hueLimit;      \n"
-         "uniform float $$customWeight;  \n"
-         "uniform vec3  $$despillColor;  \n"
-         "uniform vec3  $$respillColor;  \n"
-         "uniform float $$blackPoint;    \n"
-         "uniform float $$whitePoint;    \n"
-         "uniform vec3  $$protectColor;  \n"
-         "uniform float $$protectTol;    \n"
-         "uniform float $$protectFall;   \n"
-         "uniform float $$protectEffect; \n";
-}
-
-// ── gpuEngine_shader_hash_at ──────────────────────────────────────────────────
-
-Hash DespillAPIop::gpuEngine_shader_hash_at(double time)
-{
-  Hash hash;
-  // Only knobs that affect shader *structure* go here.
-  // Uniforms (floats, colors) do NOT go here.
-  hash.append(knob("absolute_mode")->get_value_at(time));
-  hash.append(knob("protect_tones")->get_value_at(time));
-  hash.append(knob("protect_preview")->get_value_at(time));
-  hash.append(knob("output_despill")->get_value_at(time));
-  hash.append(knob("invert_alpha")->get_value_at(time));
-  hash.append(knob("output_alpha")->get_value_at(time));
-  hash.append(knob("invert_limit_mask")->get_value_at(time));
-  hash.append(knob("despill_math")->get_value_at(time));
-  hash.append(knob("respill_math")->get_value_at(time));
-  hash.append(knob("color")->get_value_at(time));  // determines _clr -> chan indices
-  return hash;
-}
-
-// ── gpuEngine_body ────────────────────────────────────────────────────────────
-
-const char *DespillAPIop::gpuEngine_body() const
-{
-  std::stringstream s;
-
-  // Channel indices from _clr — horneados en el source
-  // _clr: 0=R, 1=G, 2=B
-  // chan0/chan1: the two non-spill channels
-  int chan0, chan1;
-  if(_clr == Constants::COLOR_RED) {
-    chan0 = 1;
-    chan1 = 2;  // G, B
-  }
-  else if(_clr == Constants::COLOR_GREEN) {
-    chan0 = 0;
-    chan1 = 2;  // R, B
-  }
-  else {
-    chan0 = 0;
-    chan1 = 1;  // R, G
-  }
-
-  s << "{ \n"
-
-       // ── hueRotate — replica color::HueRotate() ───────────────────────────────
-       // GLSL no permite funciones locales, se declaran como funciones globales en el body
-       "vec3 hueRotate(vec3 rgb, float angle) { \n"
-       "  if (abs(angle) < 0.0001) return rgb; \n"
-       "  float cosA   = cos(angle * 0.01745329252); \n"
-       "  float sinA   = sin(angle * 0.01745329252); \n"
-       "  float sqrt3  = 1.73205080757; \n"
-       "  float common = (rgb.r + rgb.g + rgb.b) * (1.0 - cosA) / 3.0; \n"
-       "  return vec3( \n"
-       "    common + rgb.r * cosA + (-rgb.g / sqrt3 + rgb.b / sqrt3) * sinA, \n"
-       "    common + rgb.g * cosA + ( rgb.r / sqrt3 - rgb.b / sqrt3) * sinA, \n"
-       "    common + rgb.b * cosA + (-rgb.r / sqrt3 + rgb.g / sqrt3) * sinA  \n"
-       "  ); \n"
-       "} \n"
-
-       // ── despillLimit — math horneado ─────────────────────────────────────────
-       "float despillLimit(vec3 rgb) { \n";
-
-  if(k_despillMath == Constants::DESPILL_AVERAGE) {
-    s << "  return (rgb[" << chan0 << "] + rgb[" << chan1 << "]) / 2.0; \n";
-  }
-  else if(k_despillMath == Constants::DESPILL_MAX) {
-    s << "  return max(rgb[" << chan0 << "], rgb[" << chan1 << "]); \n";
-  }
-  else if(k_despillMath == Constants::DESPILL_MIN) {
-    s << "  return min(rgb[" << chan0 << "], rgb[" << chan1 << "]); \n";
-  }
-  else {  // DESPILL_CUSTOM
-    s << "  float w = ($$customWeight + 1.0) / 2.0; \n"
-      << "  return rgb[" << chan0 << "] * w + rgb[" << chan1 << "] * (1.0 - w); \n";
-  }
-
-  s << "} \n"
-
-       // ── getLuma — math horneado ──────────────────────────────────────────────
-       "float getLuma(vec3 rgb) { \n";
-
-  if(k_respillMath == Constants::LUMA_REC709) {
-    s << "  return rgb.r * 0.2126 + rgb.g * 0.7152 + rgb.b * 0.0722; \n";
-  }
-  else if(k_respillMath == Constants::LUMA_CCIR601) {
-    s << "  return rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114; \n";
-  }
-  else if(k_respillMath == Constants::LUMA_REC2020) {
-    s << "  return rgb.r * 0.2627 + rgb.g * 0.6780 + rgb.b * 0.0593; \n";
-  }
-  else if(k_respillMath == Constants::LUMA_AVERAGE) {
-    s << "  return (rgb.r + rgb.g + rgb.b) / 3.0; \n";
-  }
-  else {  // LUMA_MAX
-    s << "  return max(rgb.r, max(rgb.g, rgb.b)); \n";
-  }
-
-  s << "} \n"
-
-       // ── lumaRange — replica color::LumaRange() ───────────────────────────────
-       "float lumaRange(float luma) { \n"
-       "  float bp = $$blackPoint; \n"
-       "  float wp = $$whitePoint; \n"
-       "  if (bp <= 0.0 && wp >= 1.0) return luma; \n"
-       "  float range = wp - bp; \n"
-       "  if (range <= 0.0) return luma; \n"
-       "  return clamp((luma - bp) / range, 0.0, 1.0); \n"
-       "} \n"
-
-       // ── doDespill — replica color::Despill() ─────────────────────────────────
-       // Returns vec4(despilledRGB, protectResult)
-       "vec4 doDespill(vec3 rgb, float limit) { \n"
-       "  vec3  hued        = hueRotate(rgb, $$hueShift); \n"
-       "  float limitResult = despillLimit(hued) * limit; \n";
-
-  // Protect tones — horneado
-  if(k_protectTones) {
-    s << "  float len = length(rgb) * length($$protectColor) + 0.000001; \n"
-         "  float cosAngle     = clamp(dot(rgb, $$protectColor) / len, 0.0, 1.0); \n"
-         "  float protectResult = pow(cosAngle, 1.0 / pow(clamp($$protectTol, 0.0001, 1.0), "
-         "$$protectFall)); \n"
-         "  limitResult = limitResult * (1.0 + protectResult * $$protectEffect); \n";
-  }
-  else {
-    s << "  float protectResult = 0.0; \n";
-  }
-
-  s << "  hued[" << _clr << "] = min(hued[" << _clr
-    << "], limitResult); \n"
-       "  vec3 result = hueRotate(hued, -$$hueShift); \n"
-       "  return vec4(result, protectResult); \n"
-       "} \n"
-
-       // ── Main ─────────────────────────────────────────────────────────────────
-       "  float savedAlpha = OUT.a; \n"
-       "  vec3  rgb        = OUT.rgb; \n"
-       "  float spillMatte = 0.0; \n";
-
-  // Protection preview — horneado, salida temprana
-  if(k_protectPrev && k_protectTones) {
-    s << "  vec4  despilled = doDespill(rgb, $$hueLimit); \n"
-         "  float mask      = clamp(despilled.w * $$protectEffect, 0.0, 1.0); \n"
-         "  OUT = vec4(rgb * mask, savedAlpha); \n"
-         "} \n";
-    _shaderBodyText = s.str();
-    return _shaderBodyText.c_str();
-  }
-
-  s << "  vec4  rawDespilled = doDespill(rgb, $$hueLimit); \n"
-       "  vec3  spillVec     = rgb - rawDespilled.rgb; \n"
-       "  float spillLuma    = getLuma(spillVec); \n"
-       "  vec3  despilledRGB; \n"
-       "  float spillLumaFull; \n";
-
-  // Absolute vs relative — horneado
-  if(!k_absMode) {
-    s << "  despilledRGB  = rawDespilled.rgb; \n"
-         "  spillLumaFull = spillLuma; \n";
-  }
-  else {
-    // despillColor viene como uniform — soporta color picker y canal puro
-    s << "  vec4  pickDespilled  = doDespill($$despillColor, $$hueLimit); \n"
-         "  vec3  pickSpill      = $$despillColor - pickDespilled.rgb; \n"
-         "  float pickSpillLuma  = getLuma(pickSpill); \n"
-         "  spillLumaFull        = (pickSpillLuma == 0.0) ? 0.0 : spillLuma / pickSpillLuma; \n"
-         "  vec3  scaledSpill    = $$despillColor * spillLumaFull; \n"
-         "  despilledRGB         = rgb - scaledSpill; \n"
-         "  spillMatte           = pickDespilled.w; \n";
-  }
-
-  // Output type — horneado
-  if(k_outputType == Constants::OUTPUT_DESPILL) {
-    s << "  float rangeLuma = lumaRange(spillLumaFull); \n"
-         "  vec3  outRGB    = despilledRGB + $$respillColor * rangeLuma; \n"
-         "  spillLumaFull   = rangeLuma; \n";
-  }
-  else {
-    s << "  vec3 outRGB = spillVec; \n";
-  }
-
-  // Alpha — horneado
-  if(!k_outputAlpha) {
-    s << "  spillMatte = savedAlpha; \n";
-  }
-  else if(!k_invertAlpha) {
-    s << "  spillMatte = spillLumaFull; \n";
-  }
-  else {
-    s << "  spillMatte = 1.0 - spillLumaFull; \n";
-  }
-
-  s << "  OUT = vec4(outRGB, clamp(spillMatte, 0.0, 1.0)); \n"
-       "} \n";
-
-  _shaderBodyText = s.str();
-  return _shaderBodyText.c_str();
-}
-
-// ── gpuEngine_GL_begin — sube los uniforms cada frame ────────────────────────
-
-void DespillAPIop::gpuEngine_GL_begin(GPUContext *context)
-{
-  // Scalars — bind por valor segun firma: bind(name, float v)
-  context->bind("$$hueShift", _hueShift);
-  context->bind("$$hueLimit", k_hueLimit);
-  context->bind("$$blackPoint", k_blackPoint);
-  context->bind("$$whitePoint", k_whitePoint);
-  context->bind("$$protectEffect", k_protectEffect);
-  context->bind("$$protectTol", k_protectTolerance);
-  context->bind("$$protectFall", k_protectFalloff);
-  context->bind("$$customWeight", (k_customWeight + 1.0f) / 2.0f);
-
-  // vec3 — bind(name, siz, count, float[]) requiere array no-const
-  float respill[3] = {k_respillColor[0], k_respillColor[1], k_respillColor[2]};
-  float protect[3] = {k_protectColor[0], k_protectColor[1], k_protectColor[2]};
-  context->bind("$$respillColor", 3, 1, respill);
-  context->bind("$$protectColor", 3, 1, protect);
-
-  // despillColor — replica la logica de _validate() y ProcessCPU()
-  float despillColor[3];
-  if(_usePickedColor == 1) {
-    despillColor[0] = k_spillPick[0];
-    despillColor[1] = k_spillPick[1];
-    despillColor[2] = k_spillPick[2];
-  }
-  else {
-    despillColor[0] = _clr == 0 ? 1.0f : 0.0f;
-    despillColor[1] = _clr == 1 ? 1.0f : 0.0f;
-    despillColor[2] = _clr == 2 ? 1.0f : 0.0f;
-  }
-  context->bind("$$despillColor", 3, 1, despillColor);
-}
-
-void DespillAPIop::gpuEngine_GL_end(GPUContext *context)
-{
-  // nada que limpiar
-}
-
 static Iop *build(Node *node)
 {
-  return (new NukeWrapper(new DespillAPIop(node)))->channelsRGBoptionalAlpha();
+  return (new NukeWrapper(new DespillAPIop(node)))->noChannels();
 }
 const Iop::Description DespillAPIop::d("DespillAP", "Keyer/DespillAP", build);
