@@ -3,6 +3,7 @@
 
 #include "DDImage/DDMath.h"
 #include "DDImage/Iop.h"
+#include "DDImage/LookupCurves.h"
 #include "DDImage/NukeWrapper.h"
 using namespace DD::Image;
 #include <sstream>
@@ -41,6 +42,8 @@ using namespace DD::Image;
   "Copyright 2025. Developed by Gonzalo Rojas.\n";
 
 static const char *const CLASS = "DespillAP";
+
+static const CurveDescription luminanceCurveDefault[] = {{"shadow", "curve 1 0"}, {0}};
 
 class DespillAPIop : public Iop
 {
@@ -102,6 +105,7 @@ class DespillAPIop : public Iop
   int k_respillMath;
   float k_blackPoint;
   float k_whitePoint;
+  double _luminance[2];
 
   // output knobs
   int k_outputType;
