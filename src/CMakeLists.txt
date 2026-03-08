@@ -128,6 +128,9 @@ if(WIN32)
     )
     target_compile_definitions(${PLUGIN_NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(${PLUGIN_NAME} PRIVATE opengl32)
+    # GLEW — Nuke bundles glew32.lib alongside DDImage.lib
+    find_library(_GLEW_LIB glew32 HINTS "${Nuke_ROOT}" REQUIRED)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE "${_GLEW_LIB}")
 else()
     set(_OUT "${CMAKE_BINARY_DIR}/lib")
     set_target_properties(${PLUGIN_NAME} PROPERTIES
