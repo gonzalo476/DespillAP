@@ -150,7 +150,7 @@ namespace color
       limitResult = despilled[chans[0]] * customWeight + despilled[chans[1]] * (1 - customWeight);
     }
 
-    float protectResult;
+    float protectResult = 0.0f;
     bool isProtectDifferent = (protectColor[0] != protectColor[1]) ||
                               (protectColor[0] != protectColor[2]) ||
                               (protectColor[1] != protectColor[2]);
