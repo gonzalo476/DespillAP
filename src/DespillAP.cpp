@@ -416,9 +416,6 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
   limitRd.add(k_limitChannel);
 
   // Spill output channel — base pointer offset to row start, indexed by (x0 - x) like original
-  float *spillOutBase =
-      (channels & k_outputSpillChannel) ? row.writable(k_outputSpillChannel) + x : nullptr;
-
   bool writeAlphaOut = (channels & k_outputSpillChannel) != 0;
   pixel::RowWriter alphaOut(row, x);
   if(writeAlphaOut) alphaOut.add(k_outputSpillChannel);
@@ -543,10 +540,7 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
       spillMatte = 1.0f - spillLumaFull;
     }
 
-    // Write spill output channel — indexed as (x0 - x) to match original's x0 offset
-    //if(spillOutBase != nullptr) {
-    //  spillOutBase[x0 - x] = clamp(spillMatte, 0.0f, 1.0f);
-    //}
+    // Write spill output channel
     if(writeAlphaOut) {
       alphaOut.write(0, clamp(spillMatte, 0.0f, 1.0f));
     }
