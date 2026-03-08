@@ -1,8 +1,8 @@
 
-#include "include/DespillAP.h"
+#include "DespillAP.h"
 
-#include "include/Color.h"
-#include "include/Constants.h"
+#include "Color.h"
+#include "Constants.h"
 
 enum inputs {
   inputSource = 0,
