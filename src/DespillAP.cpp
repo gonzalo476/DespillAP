@@ -49,6 +49,9 @@ DespillAPIop::DespillAPIop(Node *node) : Iop(node)
   isColorConnected = false;
   isRespillConnected = false;
 
+  _luminance[0] = 0.0f;
+  _luminance[1] = 1.0f;
+
   _returnColor = 0;
 }
 
@@ -147,11 +150,8 @@ void DespillAPIop::knobs(Knob_Callback f)
       f,
       "Replacement color added where spill was removed. Multiplied by Respill input if connected");
 
-  Float_knob(f, &k_blackPoint, IRange(0, 1), "luma_black", "blackpoint");
-  Tooltip(f, "Lower luminance bound. Pixels below this value are fully clipped to 0.");
-
-  Float_knob(f, &k_whitePoint, IRange(0, 1), "luma_white", "whitepoint");
-  Tooltip(f, "Upper luminance bound. Pixels above this value are fully clipped to 1.");
+  Range_knob(f, _luminance, 2, "luma_range", "range");
+  SetRange(f, 0.0, 1.0);
 
   Divider(f, "<b>Output</b>");
 
@@ -517,7 +517,7 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
     // Output type
     Vector4 result;
     if(k_outputType == Constants::OUTPUT_DESPILL) {
-      float rangeLuma = color::LumaRange(spillLumaFull, k_blackPoint, k_whitePoint);
+      float rangeLuma = color::LumaRange(spillLumaFull, _luminance[0], _luminance[1]);
       result = Vector4(despilledRGB.x + finalRespill.x * rangeLuma,
                        despilledRGB.y + finalRespill.y * rangeLuma,
                        despilledRGB.z + finalRespill.z * rangeLuma, 0.0f);
