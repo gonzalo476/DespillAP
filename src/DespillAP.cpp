@@ -3,6 +3,7 @@
 
 #include "Color.h"
 #include "Constants.h"
+#include "Pixel.h"
 
 enum inputs {
   inputSource = 0,
@@ -371,231 +372,186 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
 
 void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &row)
 {
-  // get main input data
+  // FETCH INPUT ROWS
+
   ChannelSet requestedChannels = channels;
-  requestedChannels += Mask_RGB;  // Add RGB
+  requestedChannels += Mask_RGB;
   row.get(input0(), y, x, r, requestedChannels);
 
-  // copy all non rgb channels
+  // Copy non-RGB, non-spill-output channels straight through
   ChannelSet copyMask = channels - Mask_RGB - k_outputSpillChannel;
   row.pre_copy(row, copyMask);
   row.copy(row, copyMask, x, r);
 
-  // get input color reference (for atm color detection)
+  // Color reference row — always constructed, only fetched if connected
   Row color_row(x, r);
-  if(input(inputColor) != nullptr) {
-    color_row.get(*input(inputColor), y, x, r, Mask_RGB);
-  }
+  if(input(inputColor) != nullptr) color_row.get(*input(inputColor), y, x, r, Mask_RGB);
 
-  // get optional respill color input (custom replacement color)
+  // Respill row — always constructed, only fetched if connected
   Row respill_row(x, r);
-  if(input(inputRespill) != nullptr) {
-    respill_row.get(*input(inputRespill), y, x, r, Mask_RGB);
-  }
+  if(input(inputRespill) != nullptr) respill_row.get(*input(inputRespill), y, x, r, Mask_RGB);
 
-  // get limit matte input
+  // Limit matte row — always constructed, only fetched if connected
   Row limit_matte_row(x, r);
-  const float *limitPtr;
-  if(input(inputLimit) != nullptr) {
-    limit_matte_row.get(*input(inputLimit), y, x, r, Mask_All);
-  }
-  if(input(inputLimit) != nullptr) {
-    limitPtr = limit_matte_row[k_limitChannel] + x;
-  }
+  if(input(inputLimit) != nullptr) limit_matte_row.get(*input(inputLimit), y, x, r, Mask_All);
 
-  Vector3 rgb;
-  Vector3 colorRgb;
-  Vector3 respillRgb;
+  // PIXEL CURSORS
 
-  // pixel pointers for multichannel processing
-  std::array<const float *, 3> inPtr;
-  std::array<const float *, 3> colorPtr;
-  std::array<const float *, 3> respillPtr;
-  std::array<float *, 3> outPtr;
-
-  // get pointer to input alpha channel for pass-throught
-  const float *input_alpha = row[Chan_Alpha] + x;
-
-  // lambda to increment all pixel pointers
-  auto incrementPointers = [&]() {
-    for(int i = 0; i < 3; ++i) {
-      ++inPtr[i];
-      ++outPtr[i];
-      if(input(inputColor) != nullptr) {
-        ++colorPtr[i];
-      }
-      if(input(inputRespill) != nullptr) {
-        ++respillPtr[i];
-      }
-    }
-    ++input_alpha;
-    if(input(inputLimit) != nullptr) {
-      ++limitPtr;
-    }
-  };
-
-  // set pixel pointers to point to RGB channels
-  for(int i = 0; i < 3; ++i) {
-    auto chan = static_cast<Channel>(i + 1);
-    inPtr[i] = row[chan] + x;
-    outPtr[i] = row.writable(chan) + x;
-    colorPtr[i] = color_row[chan] + x;
-    respillPtr[i] = respill_row[chan] + x;
+  // Primary source: read + write RGB
+  pixel::PixelCursor src(row, x);
+  for(auto ch : pixel::rgbChannels()) {
+    src.addReadChannel(ch);
+    src.addWriteChannel(ch);
   }
 
-  // Main pixel loop
-  for(int x0 = x; x0 < r; ++x0) {
-    // read rgb values from the current pixel
-    for(int i = 0; i < 3; i++) {
-      rgb[i] = *inPtr[i];
-      colorRgb[i] = *colorPtr[i];
-      respillRgb[i] = *respillPtr[i];
-    }
+  // Color reference — always read (row is zeroed when not connected, matching original)
+  pixel::RowReader colorRd(color_row, x);
+  for(auto ch : pixel::rgbChannels()) colorRd.add(ch);
 
-    // early exit if color is unchanged
-    if(_returnColor == 1) {
-      incrementPointers();
-      continue;
-    }
+  // Respill — always read (same reason)
+  pixel::RowReader respillRd(respill_row, x);
+  for(auto ch : pixel::rgbChannels()) respillRd.add(ch);
+
+  // Alpha pass-through
+  pixel::RowReader alphaRd(row, x);
+  alphaRd.add(Chan_Alpha);
+
+  // Limit — always read; value is ignored when not connected (original uses limitPtr unconditionally)
+  pixel::RowReader limitRd(limit_matte_row, x);
+  limitRd.add(k_limitChannel);
+
+  // Spill output channel — base pointer offset to row start, indexed by (x0 - x) like original
+  float *spillOutBase =
+      (channels & k_outputSpillChannel) ? row.writable(k_outputSpillChannel) + x : nullptr;
+
+  // PIXEL LOOP
+
+  for(int x0 = x; x0 < r; ++x0, src.advance(), colorRd.advance(), respillRd.advance(),
+          alphaRd.advance(), limitRd.advance()) {
+    // Read current pixel — always from all rows, matching original
+    Vector3 rgb(src.read(0), src.read(1), src.read(2));
+    Vector3 colorRgb(colorRd[0], colorRd[1], colorRd[2]);
+    Vector3 respillRgb(respillRd[0], respillRd[1], respillRd[2]);
+
+    // Early exit: _returnColor bypasses all processing.
+    // Do NOT explicitly write output — Nuke's writable() already aliases
+    // the input memory in this case, so the pixel passes through untouched.
+    if(_returnColor == 1) continue;
 
     float spillMatte = 0.0f;
     float hueShift = 0.0f;
     float autoShift = 0.0f;
     Vector3 despillColor;
 
-    // determine despill color and hue shift
+    // Determine despill color and hue shift — identical to original
     if(isColorConnected) {
-      // use color from connected input for atm color detection
       despillColor = colorRgb;
       Vector3 v1 = color::VectorToPlane(despillColor);
       Vector3 v2 = color::VectorToPlane(Vector3(1.0f, 0.0f, 0.0f));
       autoShift = color::ColorAngle(v1, v2);
-      autoShift = autoShift * 180.0f / M_PI_F;  // rad to deg
+      autoShift = autoShift * 180.0f / M_PI_F;
       hueShift = k_hueOffset - autoShift;
     }
     else {
-      // use manual color detection
       if(_usePickedColor == 1) {
         despillColor = Vector3(k_spillPick);
       }
       else {
-        // create a color constant based on selected channel
-        // 0=red, 1=green, 2=blue
         despillColor =
             Vector3(_clr == 0 ? 1.0f : 0.0f, _clr == 1 ? 1.0f : 0.0f, _clr == 2 ? 1.0f : 0.0f);
       }
       hueShift = _hueShift;
     }
 
-    // apply limit matte if connected
-    float invertInputLimit = k_invertLimitMask ? (1.0f - (*limitPtr)) : *limitPtr;
+    // Limit matte — read unconditionally, applied only when isLimitConnected
+    float invertInputLimit = k_invertLimitMask ? (1.0f - limitRd[0]) : limitRd[0];
     float limitResult = isLimitConnected ? k_hueLimit * invertInputLimit : k_hueLimit;
 
-    // perform limit operation
+    // Core despill
     Vector4 rawDespilled = color::Despill(rgb, hueShift, _clr, k_despillMath, limitResult,
                                           k_customWeight, k_protectTones, k_protectColor,
                                           k_protectTolerance, k_protectEffect, k_protectFalloff);
 
-    // case: if tones are protected, output protection matte
+    // Protection preview mode
     if(k_protectPrev && k_protectTones) {
-      for(int i = 0; i < 3; i++) {
-        *outPtr[i] = rgb[i] * clamp(rawDespilled.w * k_protectEffect, 0.0f, 1.0f);
-      }
-      // move to next pixel channel
-      incrementPointers();
+      float mask = clamp(rawDespilled.w * k_protectEffect, 0.0f, 1.0f);
+      src.write(0, rgb.x * mask);
+      src.write(1, rgb.y * mask);
+      src.write(2, rgb.z * mask);
       continue;
     }
 
-    // calculate spill amount (difference between rgb and raw despilled)
-    Vector3 spillVec = {
-        rgb[0] - rawDespilled.x,
-        rgb[1] - rawDespilled.y,
-        rgb[2] - rawDespilled.z,
-    };
+    // Spill vector (difference between original and despilled)
+    Vector3 spillVec(rgb[0] - rawDespilled.x, rgb[1] - rawDespilled.y, rgb[2] - rawDespilled.z);
 
     float spillLuma = color::GetLuma(spillVec, k_respillMath);
 
-    // process key generation and normalization
+    // Relative vs absolute mode
     Vector3 despilledRGB;
     Vector4 spillFull;
     float spillLumaFull;
 
     if(!k_absMode) {
-      // relative mode: use calculated values
-      despilledRGB = {rawDespilled.x, rawDespilled.y, rawDespilled.z};
+      despilledRGB = Vector3(rawDespilled.x, rawDespilled.y, rawDespilled.z);
       spillFull = Vector4(spillVec.x, spillVec.y, spillVec.z, 0.0f);
       spillLumaFull = spillLuma;
     }
     else {
-      // absolute mode: normalize spill relative to pícked color
-      // calculate how much the pícked color would be despilled
       Vector4 pickDespilled = color::Despill(
           despillColor, hueShift, _clr, k_despillMath, limitResult, k_customWeight, k_protectTones,
           k_protectColor, k_protectTolerance, k_protectEffect, k_protectFalloff);
 
-      Vector3 pickSpill = {
-          despillColor.x - pickDespilled.x,
-          despillColor.y - pickDespilled.y,
-          despillColor.z - pickDespilled.z,
-      };
+      Vector3 pickSpill(despillColor.x - pickDespilled.x, despillColor.y - pickDespilled.y,
+                        despillColor.z - pickDespilled.z);
 
       float pickSpillLuma = color::GetLuma(pickSpill, k_respillMath);
 
-      // normalize current spill relative to picked color spill
       spillLumaFull = (pickSpillLuma == 0.0f) ? 0.0f : spillLuma / pickSpillLuma;
       Vector3 scaledSpill = despillColor * spillLumaFull;
       spillFull = Vector4(scaledSpill.x, scaledSpill.y, scaledSpill.z, 0.0f);
-      despilledRGB = {rgb[0] - scaledSpill.x, rgb[1] - scaledSpill.y, rgb[2] - scaledSpill.z};
+      despilledRGB =
+          Vector3(rgb[0] - scaledSpill.x, rgb[1] - scaledSpill.y, rgb[2] - scaledSpill.z);
       spillMatte = pickDespilled.w;
     }
 
-    // calculate final respill color (replacement color for removed spill)
-    Vector3 respillBase = {k_respillColor[0], k_respillColor[1], k_respillColor[2]};
-    Vector3 respillInput = respillRgb;
-    Vector3 finalRespill =
-        isRespillConnected ? Vector3(respillInput.x, respillInput.y, respillInput.z) : respillBase;
+    // Respill color — original always builds both and then picks one
+    Vector3 respillBase(k_respillColor[0], k_respillColor[1], k_respillColor[2]);
+    Vector3 respillInput(respillRgb.x, respillRgb.y, respillRgb.z);
+    Vector3 finalRespill = isRespillConnected ? respillInput : respillBase;
 
-    // output type: despilled image or spill matte
+    // Output type
     Vector4 result;
     if(k_outputType == Constants::OUTPUT_DESPILL) {
-      // output despilled image with respill color added back
       float rangeLuma = color::LumaRange(spillLumaFull, k_blackPoint, k_whitePoint);
-      result = {despilledRGB.x + finalRespill.x * rangeLuma,
-                despilledRGB.y + finalRespill.y * rangeLuma,
-                despilledRGB.z + finalRespill.z * rangeLuma, 0.0f};
+      result = Vector4(despilledRGB.x + finalRespill.x * rangeLuma,
+                       despilledRGB.y + finalRespill.y * rangeLuma,
+                       despilledRGB.z + finalRespill.z * rangeLuma, 0.0f);
       spillLumaFull = rangeLuma;
     }
     else {
       result = spillFull;
     }
 
-    // determine alpha output value
+    // Alpha output
     if(!k_outputAlpha) {
-      // pass the original input alpha channel
-      spillMatte = *input_alpha;
+      spillMatte = alphaRd[0];
     }
     else if(!k_invertAlpha) {
-      // output spill amount as alpha channel
       spillMatte = spillLumaFull;
     }
     else {
-      // output inverted spill amount as alpha channel
       spillMatte = 1.0f - spillLumaFull;
     }
 
-    // write alpha channel to specified output channel
-    // if 'channels' contains 'k_outputSpillChannel' or the selected output channel
-    if(channels & k_outputSpillChannel) {
-      *(row.writable(k_outputSpillChannel) + x0) = clamp(spillMatte, 0.0f, 1.0f);
+    // Write spill output channel — indexed as (x0 - x) to match original's x0 offset
+    if(spillOutBase != nullptr) {
+      spillOutBase[x0 - x] = clamp(spillMatte, 0.0f, 1.0f);
     }
 
-    // write RGB channels to output
-    for(int i = 0; i < 3; i++) {
-      *outPtr[i] = result[i];
-    }
-
-    // move to next pixel channel
-    incrementPointers();
+    // Write RGB
+    src.write(0, result.x);
+    src.write(1, result.y);
+    src.write(2, result.z);
   }
 }
 
