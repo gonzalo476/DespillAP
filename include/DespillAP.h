@@ -1,4 +1,3 @@
-
 #ifndef DESPILL_AP_H
 #define DESPILL_AP_H
 
@@ -10,7 +9,6 @@ using namespace DD::Image;
 #include <string>
 
 #include "DDImage/Format.h"
-#include "DDImage/GPUContext.h"
 #include "DDImage/Knobs.h"
 #include "DDImage/Row.h"
 #include "DDImage/Tile.h"
@@ -66,15 +64,6 @@ class DespillAPIop : public Iop
   void engine(int y, int l, int r, ChannelMask channels, Row &row);
 
   void ProcessCPU(int y, int x, int r, ChannelMask channels, Row &row);
-
-  // gpu
-  const char *gpuEngine_decl() const override;
-  const char *gpuEngine_body() const override;
-  Hash gpuEngine_shader_hash_at(double time) override;
-  void gpuEngine_GL_begin(DD::Image::GPUContext *context) override;
-  void gpuEngine_GL_end(DD::Image::GPUContext *context) override;
-
-  mutable std::string _shaderBodyText;
 
   const char *input_label(int n, char *) const;
   void set_input(int i, Op *op, int input, int offset);
