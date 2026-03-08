@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include "Constants.h"
 #include "DDImage/DDMath.h"
 #include "DDImage/Vector3.h"
 #include "DDImage/Vector4.h"
-#include "include/Constants.h"
 
 namespace nuke = DD::Image;
 
