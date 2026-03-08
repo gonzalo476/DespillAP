@@ -419,10 +419,14 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
   float *spillOutBase =
       (channels & k_outputSpillChannel) ? row.writable(k_outputSpillChannel) + x : nullptr;
 
+  bool writeAlphaOut = (channels & k_outputSpillChannel) != 0;
+  pixel::RowWriter alphaOut(row, x);
+  if(writeAlphaOut) alphaOut.add(k_outputSpillChannel);
+
   // PIXEL LOOP
 
   for(int x0 = x; x0 < r; ++x0, src.advance(), colorRd.advance(), respillRd.advance(),
-          alphaRd.advance(), limitRd.advance()) {
+          alphaRd.advance(), limitRd.advance(), alphaOut.advance()) {
     // Read current pixel — always from all rows, matching original
     Vector3 rgb(src.read(0), src.read(1), src.read(2));
     Vector3 colorRgb(colorRd[0], colorRd[1], colorRd[2]);
@@ -473,6 +477,7 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
       src.write(0, rgb.x * mask);
       src.write(1, rgb.y * mask);
       src.write(2, rgb.z * mask);
+      alphaOut.write(0, clamp(mask, 0.0f, 1.0f));
       continue;
     }
 
@@ -539,8 +544,11 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
     }
 
     // Write spill output channel — indexed as (x0 - x) to match original's x0 offset
-    if(spillOutBase != nullptr) {
-      spillOutBase[x0 - x] = clamp(spillMatte, 0.0f, 1.0f);
+    //if(spillOutBase != nullptr) {
+    //  spillOutBase[x0 - x] = clamp(spillMatte, 0.0f, 1.0f);
+    //}
+    if(writeAlphaOut) {
+      alphaOut.write(0, clamp(spillMatte, 0.0f, 1.0f));
     }
 
     // Write RGB
