@@ -22,7 +22,7 @@
 #  NUKE_VERSION_RELEASE
 #
 
-set(_nuke_KNOWN_VERSIONS 12.0 12.1 12.2 13.0 13.1 13.2 14.0 15.0 15.1)
+set(_nuke_KNOWN_VERSIONS 14.0 14.1 15.0 15.1 15.2 16.0)
 set(_nuke_TEST_VERSIONS) # List of Nuke-style strings (e.g. "7.0v4")
 
 

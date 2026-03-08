@@ -1,152 +1,206 @@
-# NukePlugin.cmake - CMake functions for building Nuke plugins
+# ─────────────────────────────────────────────────────────────────────────────
+# src/CMakeLists.txt
+#
+# Builds the single Nuke plugin defined in the root CMakeLists.txt.
+#
+# Source layout (fixed):
+#   proyecto/src/         ← .cpp files  (PLUGIN_MAIN + PLUGIN_HELPERS)
+#   proyecto/include/     ← ALL headers (.h always live here, never in src/)
+#
+# To add files: edit PLUGIN_NAME / PLUGIN_MAIN / PLUGIN_HELPERS in root only.
+# ─────────────────────────────────────────────────────────────────────────────
 
 if(NOT NUKE_FOUND)
-    message(FATAL_ERROR "Nuke must be found before including NukePlugin.cmake")
+    message(FATAL_ERROR "Nuke must be found before processing src/CMakeLists.txt")
 endif()
 
-# Platform-specific settings
+if(NOT DEFINED PLUGIN_NAME OR NOT DEFINED PLUGIN_MAIN)
+    message(FATAL_ERROR "PLUGIN_NAME and PLUGIN_MAIN must be set in the root CMakeLists.txt")
+endif()
+
+# ── Platform suffix ───────────────────────────────────────────────────────────
 if(APPLE)
-    set(NUKE_PLUGIN_EXTENSION ".dylib")
-    set(NUKE_PLUGIN_PREFIX "")
+    set(NUKE_PLUGIN_SUFFIX ".dylib")
 elseif(WIN32)
-    set(NUKE_PLUGIN_EXTENSION ".dll")
-    set(NUKE_PLUGIN_PREFIX "")
-else() # Linux
-    set(NUKE_PLUGIN_EXTENSION ".so")
-    set(NUKE_PLUGIN_PREFIX "")
+    set(NUKE_PLUGIN_SUFFIX ".dll")
+else()
+    set(NUKE_PLUGIN_SUFFIX ".so")
 endif()
 
-# Common compile definitions for Nuke plugins
-set(NUKE_COMPILE_DEFINITIONS
+# ── Validate and collect .cpp sources ────────────────────────────────────────
+set(_src_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+if(NOT EXISTS "${_src_dir}/${PLUGIN_MAIN}")
+    message(FATAL_ERROR
+        "PLUGIN_MAIN not found:\n  ${_src_dir}/${PLUGIN_MAIN}\n"
+        "Check PLUGIN_MAIN in root CMakeLists.txt.")
+endif()
+
+set(_plugin_sources "${_src_dir}/${PLUGIN_MAIN}")
+
+foreach(_helper ${PLUGIN_HELPERS})
+    set(_helper_path "${_src_dir}/${_helper}")
+    if(NOT EXISTS "${_helper_path}")
+        message(FATAL_ERROR
+            "PLUGIN_HELPERS: file not found:\n  ${_helper_path}\n"
+            "Check PLUGIN_HELPERS in root CMakeLists.txt.")
+    endif()
+    list(APPEND _plugin_sources "${_helper_path}")
+endforeach()
+
+# ── Collect headers from include/ ─────────────────────────────────────────────
+# Headers ALWAYS live in proyecto/include/ — never in src/.
+# They are added as sources so AUTOMOC can find Q_OBJECT declarations and
+# generate the required moc_*.cpp files. They do not affect compilation otherwise.
+set(_include_dir "${CMAKE_SOURCE_DIR}/include")
+
+file(GLOB_RECURSE _plugin_headers "${_include_dir}/*.h")
+
+if(NOT _plugin_headers)
+    message(WARNING "No headers found in ${_include_dir}  — is this intentional?")
+else()
+    list(APPEND _plugin_sources ${_plugin_headers})
+endif()
+
+# ── Build info ────────────────────────────────────────────────────────────────
+message(STATUS "------------------------------------------------------------")
+message(STATUS "Plugin          : ${PLUGIN_NAME}")
+message(STATUS "Main source     : ${PLUGIN_MAIN}")
+foreach(_h ${PLUGIN_HELPERS})
+    message(STATUS "Helper source   : ${_h}")
+endforeach()
+foreach(_h ${_plugin_headers})
+    get_filename_component(_hname "${_h}" NAME)
+    message(STATUS "Header (MOC)    : ${_hname}")
+endforeach()
+message(STATUS "------------------------------------------------------------")
+message(STATUS "Nuke include    : ${NUKE_INCLUDE_DIRS}")
+message(STATUS "DDImage lib     : ${NUKE_DDIMAGE_LIBRARY}")
+message(STATUS "Plugin suffix   : ${NUKE_PLUGIN_SUFFIX}")
+message(STATUS "Nuke version    : ${NUKE_VERSION_MAJOR}.${NUKE_VERSION_MINOR}.${NUKE_VERSION_RELEASE}")
+message(STATUS "Extra sets      :"
+    " QT=${USE_QT}"
+    " BOOST=${USE_BOOST}"
+    " OPENEXR=${USE_OPENEXR}"
+    " FFMPEG=${USE_FFMPEG}"
+    " PYSIDE=${USE_PYSIDE}"
+    " CUDA=${USE_CUDA}"
+    " OPENCL=${USE_OPENCL}"
+)
+message(STATUS "------------------------------------------------------------")
+
+# ── Target ────────────────────────────────────────────────────────────────────
+add_library(${PLUGIN_NAME} MODULE ${_plugin_sources})
+
+# ── Include directories ───────────────────────────────────────────────────────
+target_include_directories(${PLUGIN_NAME} PRIVATE
+    "${NUKE_INCLUDE_DIRS}"          # DDImage/, Blink/, fdk/, ndk/, usg/, OFX/
+    "${NUKE_INCLUDE_DIRS}/GL"       # glew.h, wglew.h  (bundled in Nuke)
+    "${_include_dir}"               # proyecto/include/  — all plugin headers
+)
+
+# ── Compile definitions ───────────────────────────────────────────────────────
+target_compile_definitions(${PLUGIN_NAME} PRIVATE
+    FN_PLUGIN
     USE_GLEW
     NDEBUG
     _GNU_SOURCE
 )
 
-# Platform-specific compile definitions
-if(UNIX AND NOT APPLE)
-    list(APPEND NUKE_COMPILE_DEFINITIONS LINUX)
-elseif(APPLE)
-    list(APPEND NUKE_COMPILE_DEFINITIONS MACOS)
-elseif(WIN32)
-    list(APPEND NUKE_COMPILE_DEFINITIONS WINDOWS)
+if(NUKE_VERSION_MAJOR VERSION_GREATER_EQUAL 14)
+    target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX _USE_MATH_DEFINES)
 endif()
 
-# Common compile flags
-set(NUKE_COMPILE_FLAGS
-    -fPIC
-    -DUSE_GLEW
+# ── Target properties ─────────────────────────────────────────────────────────
+set_target_properties(${PLUGIN_NAME} PROPERTIES
+    PREFIX ""
+    SUFFIX "${NUKE_PLUGIN_SUFFIX}"
+    POSITION_INDEPENDENT_CODE ON
 )
 
-# Function to add a Nuke plugin (simplified approach that works)
-function(add_plugin PLUGIN_NAME)
-    set(sources ${ARGN})
-    add_library(${PLUGIN_NAME} MODULE ${sources})
-    add_library(NukePlugins::${PLUGIN_NAME} ALIAS ${PLUGIN_NAME})
-    target_link_libraries(${PLUGIN_NAME} PRIVATE ${NUKE_DDIMAGE_LIBRARY})
-    target_include_directories(${PLUGIN_NAME} PRIVATE 
-        ${NUKE_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/include
-    )
-    
-    # Add essential compile definitions
-    target_compile_definitions(${PLUGIN_NAME} PRIVATE 
-        FN_PLUGIN
-        USE_GLEW
-        NDEBUG
-        _GNU_SOURCE
-    )
-    
-    if(NUKE_VERSION_MAJOR AND NUKE_VERSION_MAJOR VERSION_GREATER_EQUAL 14)
-        target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX _USE_MATH_DEFINES)
-    endif()
-    
+# ── Platform link + output dir ────────────────────────────────────────────────
+if(WIN32)
+    set(_OUT "${CMAKE_BINARY_DIR}/lib/Release")
     set_target_properties(${PLUGIN_NAME} PROPERTIES
-        PREFIX ""
-        SUFFIX "${NUKE_PLUGIN_EXTENSION}"
-        POSITION_INDEPENDENT_CODE ON
+        RUNTIME_OUTPUT_DIRECTORY         "${_OUT}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG   "${_OUT}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_OUT}"
     )
-    
-    # Configurar directorio de salida según la plataforma
-    if(WIN32)
-        # Windows: poner en /build/lib/Release/
-        set_target_properties(${PLUGIN_NAME} PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/Release"
-            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/lib/Release"
-            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lib/Release"
-        )
-    else()
-        # Linux/macOS: poner directamente en /build/lib/
-        set_target_properties(${PLUGIN_NAME} PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-        )
-    endif()
-    
-    # Platform-specific settings
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(${PLUGIN_NAME} PRIVATE dl pthread)
-    elseif(WIN32)
-        target_compile_definitions(${PLUGIN_NAME} PRIVATE 
-            WIN32_LEAN_AND_MEAN
-            NOMINMAX
-        )
-    endif()
-    
-    # Custom command para asegurar que el archivo se copie (backup method)
-    if(WIN32)
-        # Windows: copiar a /build/lib/Release/
-        add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/lib/Release"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-                "$<TARGET_FILE:${PLUGIN_NAME}>" 
-                "${CMAKE_BINARY_DIR}/lib/Release/"
-            COMMENT "Copying ${PLUGIN_NAME} to ${CMAKE_BINARY_DIR}/lib/Release/"
-        )
-        set(OUTPUT_MESSAGE "${CMAKE_BINARY_DIR}/lib/Release/")
-    else()
-        # Linux/macOS: copiar a /build/lib/
-        add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/lib"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-                "$<TARGET_FILE:${PLUGIN_NAME}>" 
-                "${CMAKE_BINARY_DIR}/lib/"
-            COMMENT "Copying ${PLUGIN_NAME} to ${CMAKE_BINARY_DIR}/lib/"
-        )
-        set(OUTPUT_MESSAGE "${CMAKE_BINARY_DIR}/lib/")
-    endif()
-    
-    message(STATUS "Plugin ${PLUGIN_NAME} configured successfully")
-    message(STATUS "  Output directory: ${OUTPUT_MESSAGE}")
-endfunction()
-
-# Function to set common Nuke plugin properties
-function(set_nuke_plugin_properties TARGET_NAME)
-    set_target_properties(${TARGET_NAME} PROPERTIES
-        PREFIX "${NUKE_PLUGIN_PREFIX}"
-        SUFFIX "${NUKE_PLUGIN_EXTENSION}"
-        POSITION_INDEPENDENT_CODE ON
+    target_compile_definitions(${PLUGIN_NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE opengl32)
+else()
+    set(_OUT "${CMAKE_BINARY_DIR}/lib")
+    set_target_properties(${PLUGIN_NAME} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${_OUT}"
+        RUNTIME_OUTPUT_DIRECTORY "${_OUT}"
     )
-endfunction()
-
-# Print Nuke configuration info
-message(STATUS "Nuke Configuration:")
-message(STATUS "  Include dirs: ${NUKE_INCLUDE_DIRS}")
-message(STATUS "  Library dirs: ${NUKE_LIBRARY_DIRS}")
-message(STATUS "  DDImage library: ${NUKE_DDIMAGE_LIBRARY}")
-if(NUKE_RIPFRAMEWORK_LIBRARY)
-    message(STATUS "  RIPFramework library: ${NUKE_RIPFRAMEWORK_LIBRARY}")
-else()
-    message(STATUS "  RIPFramework library: NOT FOUND (minimal installation)")
-endif()
-if(NUKE_EXECUTABLE)
-    message(STATUS "  Executable: ${NUKE_EXECUTABLE}")
-else()
-    message(STATUS "  Executable: NOT FOUND (dev container)")
-endif()
-message(STATUS "  Plugin extension: ${NUKE_PLUGIN_EXTENSION}")
-if(NUKE_VERSION_MAJOR)
-    message(STATUS "  Version: ${NUKE_VERSION_MAJOR}.${NUKE_VERSION_MINOR}.${NUKE_VERSION_RELEASE}")
+    target_link_libraries(${PLUGIN_NAME} PRIVATE dl pthread)
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GL)
 endif()
 
-add_plugin(DespillAP DespillAP.cpp)
+# ── Core Nuke lib ─────────────────────────────────────────────────────────────
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${NUKE_DDIMAGE_LIBRARY})
+
+# ── Extra sets ────────────────────────────────────────────────────────────────
+if(USE_BOOST)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::BOOST)
+endif()
+
+if(USE_OPENEXR)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::OPENEXR)
+endif()
+
+if(USE_FFMPEG)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::FFMPEG)
+endif()
+
+if(USE_PYSIDE)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::PYSIDE)
+endif()
+
+if(USE_CUDA)
+    if(CUDAToolkit_FOUND)
+        target_link_libraries(${PLUGIN_NAME} PRIVATE CUDA::cudart)
+    else()
+        target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::CUDA)
+    endif()
+endif()
+
+if(USE_OPENCL)
+    if(OpenCL_FOUND)
+        target_link_libraries(${PLUGIN_NAME} PRIVATE OpenCL::OpenCL)
+    else()
+        target_link_libraries(${PLUGIN_NAME} PRIVATE NukeExtra::OpenCL)
+    endif()
+endif()
+
+# ── Qt ────────────────────────────────────────────────────────────────────────
+if(USE_QT)
+    if(QT_VERSION_MAJOR EQUAL 6)
+        target_link_libraries(${PLUGIN_NAME} PRIVATE
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets)
+    else()
+        target_link_libraries(${PLUGIN_NAME} PRIVATE
+            Qt5::Core Qt5::Gui Qt5::Widgets Qt5::OpenGL)
+    endif()
+endif()
+
+# ── RIPFramework / Blink (opt-in) ─────────────────────────────────────────────
+# Uncomment if your plugin uses BlinkScript / RIPFramework:
+# if(NUKE_RIPFRAMEWORK_LIBRARY)
+#     target_link_libraries(${PLUGIN_NAME} PRIVATE ${NUKE_RIPFRAMEWORK_LIBRARY})
+#     message(STATUS "  + RIPFramework linked")
+# else()
+#     message(WARNING "  ! RIPFramework not found")
+# endif()
+
+# ── Post-build copy ───────────────────────────────────────────────────────────
+add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:${PLUGIN_NAME}>" "${_OUT}/"
+    COMMENT "Copying ${PLUGIN_NAME}${NUKE_PLUGIN_SUFFIX}  ->  ${_OUT}/"
+)
+
+message(STATUS "Plugin output   : ${_OUT}/")
