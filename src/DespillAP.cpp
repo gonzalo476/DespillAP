@@ -367,12 +367,6 @@ void DespillAPIop::_request(int x, int y, int r, int t, ChannelMask channels, in
 
 void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
 {
-  callCloseAfter(0);
-  ProcessCPU(y, x, r, channels, row);
-}
-
-void DespillAPIop::ProcessCPU(int y, int x, int r, ChannelMask channels, Row &row)
-{
   // FETCH INPUT ROWS
 
   ChannelSet requestedChannels = channels;
