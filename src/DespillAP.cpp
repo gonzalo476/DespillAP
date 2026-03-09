@@ -53,6 +53,8 @@ DespillAPIop::DespillAPIop(Node *node) : Iop(node)
   _luminance[1] = 1.0f;
 
   _returnColor = 0;
+
+  // colorspace::KnobPair cs_;
 }
 
 void DespillAPIop::knobs(Knob_Callback f)
@@ -80,6 +82,12 @@ void DespillAPIop::knobs(Knob_Callback f)
   Float_knob(f, &k_customWeight, IRange(-1, 1), "custom_weight", "");
   SetFlags(f, Knob::DISABLED);
   Tooltip(f, "Custom weight for despill calculation. Only active when Math is set to Custom");
+
+  Divider(f, "<b>Colorspace</b>");
+  cs_.hideInputSlot();
+  cs_.hideSwap();
+  cs_.hideBradford();
+  cs_.addKnobs(f);
 
   Divider(f, "<b>Hue</b>");
 
@@ -224,8 +232,11 @@ int DespillAPIop::knob_changed(Knob *k)
     }
     return 1;
   }
+
+  if(cs_.knobChanged(k, this)) return 1;
+
   knob("tile_color")->set_value(0x8b8b8bff);  // node color
-  return 0;
+  return 1;
 }
 
 const char *DespillAPIop::input_label(int n, char *) const
@@ -420,12 +431,20 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
   pixel::RowWriter alphaOut(row, x);
   if(writeAlphaOut) alphaOut.add(k_outputSpillChannel);
 
+  // transform constructors
+  colorspace::ColorTransform xf = cs_.buildTransform();
+  colorspace::ColorTransform xfInv = cs_.buildTransformInverse();
+
   // PIXEL LOOP
 
   for(int x0 = x; x0 < r; ++x0, src.advance(), colorRd.advance(), respillRd.advance(),
           alphaRd.advance(), limitRd.advance(), alphaOut.advance()) {
-    // Read current pixel — always from all rows, matching original
+    // apply in color transformation to the src img
     Vector3 rgb(src.read(0), src.read(1), src.read(2));
+    RGBcolor p = {rgb.x, rgb.y, rgb.z};
+    p = colorspace::transform(xf, p);
+    rgb = Vector3(p[0], p[1], p[2]);
+
     Vector3 colorRgb(colorRd[0], colorRd[1], colorRd[2]);
     Vector3 respillRgb(respillRd[0], respillRd[1], respillRd[2]);
 
@@ -545,10 +564,14 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
       alphaOut.write(0, clamp(spillMatte, 0.0f, 1.0f));
     }
 
+    // revert color transformation
+    RGBcolor res = {result.x, result.y, result.z};
+    res = colorspace::transform(xfInv, res);
+
     // Write RGB
-    src.write(0, result.x);
-    src.write(1, result.y);
-    src.write(2, result.z);
+    src.write(0, res[0]);
+    src.write(1, res[1]);
+    src.write(2, res[2]);
   }
 }
 
