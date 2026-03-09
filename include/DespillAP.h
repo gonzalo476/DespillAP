@@ -9,6 +9,8 @@ using namespace DD::Image;
 #include <sstream>
 #include <string>
 
+#include "Colorspace/ColorspaceCore.h"
+#include "Colorspace/ColorspaceKnobs.h"
 #include "DDImage/Format.h"
 #include "DDImage/Knobs.h"
 #include "DDImage/Row.h"
@@ -83,6 +85,9 @@ class DespillAPIop : public Iop
   int k_despillMath;
   float k_spillPick[3];
   float k_customWeight;
+
+  // colorspace
+  colorspace::KnobPair cs_;
 
   // hue knobs
   float k_hueOffset;
