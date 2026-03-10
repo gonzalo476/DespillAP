@@ -84,10 +84,7 @@ void DespillAPIop::knobs(Knob_Callback f)
   Tooltip(f, "Custom weight for despill calculation. Only active when Math is set to Custom");
 
   Divider(f, "<b>Colorspace</b>");
-  cs_.hideInputSlot();
-  cs_.hideSwap();
-  cs_.hideBradford();
-  cs_.addKnobs(f);
+  colorspace::ColorspaceOut_knob(f, &csIn_.curve, &csIn_.white, &csIn_.prim);
 
   Divider(f, "<b>Hue</b>");
 

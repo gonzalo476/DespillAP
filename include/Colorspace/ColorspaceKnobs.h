@@ -1,19 +1,16 @@
 /* MIT License — Copyright (c) 2025 Gonzalo Rojas
  *
- * ColorspaceKnobs.h
+ * ColorspaceKnobs.h  (v2)
  *
- * Drop-in Nuke UI component. Embeds colorspace conversion knobs into any plugin.
+ * Drop-in Nuke UI component. Registra knobs de colorspace como funciones libres.
  *
- * Usage:
- *   colorspace::KnobPair _cs;                        // member
- *   _cs.hideInputSlot();                             // optional flags before addKnobs()
- *   _cs.hideSwap();
- *   _cs.hideBradford();
- *   _cs.addKnobs(f);                                 // in knobs()
- *   if (_cs.knobChanged(k, this)) return 1;          // in knob_changed()
- *   auto xf    = _cs.buildTransform();               // before pixel loop
- *   auto xfInv = _cs.buildTransformInverse();        // optional inverse
- *   RGBcolor out = colorspace::transform(xf, in);    // per pixel
+ *   colorspace::ColorspaceIn_knob (f, &ci, &wi, &pi);
+ *   colorspace::ColorspaceOut_knob(f, &co, &wo, &po);
+ *   colorspace::ColorspaceSwap_knob(f);
+ *   colorspace::ColorspaceBradford_knob(f, &brad);
+ *
+ *   auto xf = colorspace::buildTransform(ci, wi, pi, co, wo, po, brad);
+ *   RGBcolor out = colorspace::transform(xf, in);
  */
 
 #pragma once
@@ -21,193 +18,149 @@
 #include <DDImage/Knobs.h>
 #include <DDImage/Op.h>
 
+#include <cstdio>
+
 #include "Colorspace/ColorspaceConstants.h"
 #include "Colorspace/ColorspaceCore.h"
 
 namespace colorspace
 {
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // KnobSet — one slot (in OR out)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  class KnobSet
+  namespace detail
   {
-   public:
-    explicit KnobSet(const char* prefix = "", const char* label = "in")
-        : prefix_(prefix), label_(label)
-    {
-    }
-
-    KnobSet(const KnobSet&) = delete;
-    KnobSet& operator=(const KnobSet&) = delete;
-
-    /// Call before addKnobs() to hide all three knobs of this slot.
-    void hide() { hidden_ = true; }
-
-    void addKnobs(DD::Image::Knob_Callback f)
-    {
-      using namespace DD::Image;
-
-      Enumeration_knob(f, &curveIdx_, Constants::COLOR_CURVE, kname("colorspace"), label_);
-      Tooltip(f, "Transfer curve / encoding");
-      if(hidden_) SetFlags(f, Knob::INVISIBLE);
-
-      Enumeration_knob(f, &whiteIdx_, Constants::WHITEPOINT, kname("illuminant"), "");
-      Tooltip(f, "Whitepoint (illuminant)");
-      ClearFlags(f, Knob::STARTLINE);
-      if(hidden_) SetFlags(f, Knob::INVISIBLE);
-
-      Enumeration_knob(f, &primIdx_, Constants::PRIMARY_RGB, kname("primaries"), "");
-      Tooltip(f, "RGB primaries");
-      ClearFlags(f, Knob::STARTLINE);
-      if(hidden_) SetFlags(f, Knob::INVISIBLE);
-    }
-
-    bool knobChanged(DD::Image::Knob* k)
-    {
-      return k->is(kname("colorspace")) || k->is(kname("illuminant")) || k->is(kname("primaries"));
-    }
-
-    int curveIndex() const { return curveIdx_; }
-    int whitepointIndex() const { return whiteIdx_; }
-    int primaryIndex() const { return primIdx_; }
-
-   private:
-    const char* prefix_;
-    const char* label_;
-    bool hidden_ = false;
-
-    int curveIdx_ = Constants::COLOR_LINEAR;
-    int whiteIdx_ = Constants::WHITE_D65;
-    int primIdx_ = Constants::PRIM_COLOR_SRGB;
-
-    const char* kname(const char* base) const
+    inline const char* kname(const char* prefix, const char* suffix)
     {
       static char buf[64];
-      snprintf(buf, sizeof(buf), "%s%s", prefix_, base);
+      std::snprintf(buf, sizeof(buf), "%s_%s", prefix, suffix);
       return buf;
     }
-  };
+  }  // namespace detail
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // KnobPair — in row + out row + swap button + single Bradford toggle
-  // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Slot genérico — úsalo directamente si necesitas un prefijo arbitrario.
+  // Genera: {prefix}_colorspace  /  {prefix}_illuminant  /  {prefix}_primaries
+  // ─────────────────────────────────────────────────────────────────────────────
 
-  class KnobPair
+  inline void ColorspaceSlot_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
+                                  int* primIdx, const char* prefix, const char* label)
   {
-   public:
-    KnobPair() : in_("in_", "in"), out_("out_", "out") {}
+    using namespace DD::Image;
 
-    KnobPair(const KnobPair&) = delete;
-    KnobPair& operator=(const KnobPair&) = delete;
+    Enumeration_knob(f, curveIdx, Constants::COLOR_CURVE, detail::kname(prefix, "colorspace"),
+                     label);
+    Tooltip(f, "Transfer curve / encoding");
 
-    // ── Flags — call before addKnobs() ───────────────────────────────────────
+    Enumeration_knob(f, whiteIdx, Constants::WHITEPOINT, detail::kname(prefix, "illuminant"), "");
+    Tooltip(f, "Whitepoint (illuminant)");
+    ClearFlags(f, Knob::STARTLINE);
 
-    /// Hides the entire input slot (in_colorspace, in_illuminant, in_primaries).
-    void hideInputSlot() { in_.hide(); }
+    Enumeration_knob(f, primIdx, Constants::PRIMARY_RGB, detail::kname(prefix, "primaries"), "");
+    Tooltip(f, "RGB primaries");
+    ClearFlags(f, Knob::STARTLINE);
+  }
 
-    /// Hides the entire output slot (out_colorspace, out_illuminant, out_primaries).
-    void hideOutputSlot() { out_.hide(); }
+  // Slot de entrada — prefijo default "in"
+  inline void ColorspaceIn_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
+                                int* primIdx, const char* prefix = "in", const char* label = "in")
+  {
+    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label);
+  }
 
-    /// Hides the swap in/out button.
-    void hideSwap() { hideSwap_ = true; }
+  // Slot de salida — prefijo default "out"
+  inline void ColorspaceOut_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
+                                 int* primIdx, const char* prefix = "out",
+                                 const char* label = "out")
+  {
+    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label);
+  }
 
-    /// Hides the Bradford matrix toggle.
-    void hideBradford() { hideBradford_ = true; }
+  // Botón swap — nombre interno: "cs_swap"
+  inline void ColorspaceSwap_knob(DD::Image::Knob_Callback f)
+  {
+    using namespace DD::Image;
+    Button(f, "cs_swap", "swap in/out");
+    SetFlags(f, Knob::STARTLINE);
+  }
 
-    // ── Knob registration ────────────────────────────────────────────────────
+  // Toggle Bradford — nombre interno: "bradford_matrix"
+  inline void ColorspaceBradford_knob(DD::Image::Knob_Callback f, int* bradfordFlag)
+  {
+    using namespace DD::Image;
+    Bool_knob(f, (bool*)bradfordFlag, "bradford_matrix", "Bradford matrix");
+    Tooltip(f,
+            "Applies Bradford chromatic adaptation between whitepoints. "
+            "Leave off to match Nuke's native Colorspace node behaviour.");
+  }
 
-    void addKnobs(DD::Image::Knob_Callback f)
-    {
-      using namespace DD::Image;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Llamar desde knob_changed(). Devuelve true si el knob pertenece a este sistema.
+  // inPrefix / outPrefix deben coincidir con los usados al registrar los slots.
+  // ─────────────────────────────────────────────────────────────────────────────
 
-      in_.addKnobs(f);
-      out_.addKnobs(f);
+  inline bool colorspace_knob_changed(DD::Image::Knob* k, const char* inPrefix = "in",
+                                      const char* outPrefix = "out")
+  {
+    return k->is(detail::kname(inPrefix, "colorspace")) ||
+           k->is(detail::kname(inPrefix, "illuminant")) ||
+           k->is(detail::kname(inPrefix, "primaries")) ||
+           k->is(detail::kname(outPrefix, "colorspace")) ||
+           k->is(detail::kname(outPrefix, "illuminant")) ||
+           k->is(detail::kname(outPrefix, "primaries")) || k->is("bradford_matrix") ||
+           k->is("cs_swap");
+  }
 
-      Button(f, "cs_swap", "swap in/out");
-      SetFlags(f, Knob::STARTLINE);
-      if(hideSwap_) SetFlags(f, Knob::INVISIBLE);
+  // Intercambia los valores de los slots in↔out. Llamar cuando k->is("cs_swap").
+  inline void swap_colorspace_knobs(DD::Image::Op* op, const char* inPrefix = "in",
+                                    const char* outPrefix = "out")
+  {
+    using namespace DD::Image;
 
-      Bool_knob(f, (bool*)&bradford_, "bradford_matrix", "Bradford matrix");
-      Tooltip(f,
-              "Apply Bradford chromatic adaptation between illuminants. "
-              "Leave off to match Nuke's native Colorspace node.");
-      if(hideBradford_) SetFlags(f, Knob::INVISIBLE);
-    }
+    auto get = [&](const char* prefix, const char* suffix) -> int {
+      Knob* k = op->knob(detail::kname(prefix, suffix));
+      return k ? static_cast<int>(k->get_value()) : 0;
+    };
+    auto set = [&](const char* prefix, const char* suffix, int val) {
+      Knob* k = op->knob(detail::kname(prefix, suffix));
+      if(k) k->set_value(val);
+    };
 
-    // ── knob_changed ─────────────────────────────────────────────────────────
+    int ci = get(inPrefix, "colorspace"), wi = get(inPrefix, "illuminant"),
+        pi = get(inPrefix, "primaries");
+    int co = get(outPrefix, "colorspace"), wo = get(outPrefix, "illuminant"),
+        po = get(outPrefix, "primaries");
 
-    bool knobChanged(DD::Image::Knob* k, DD::Image::Op* op)
-    {
-      if(k->is("cs_swap")) {
-        swapKnobs(op);
-        return true;
-      }
-      if(in_.knobChanged(k) || out_.knobChanged(k) || k->is("bradford_matrix")) return true;
+    set(inPrefix, "colorspace", co);
+    set(outPrefix, "colorspace", ci);
+    set(inPrefix, "illuminant", wo);
+    set(outPrefix, "illuminant", wi);
+    set(inPrefix, "primaries", po);
+    set(outPrefix, "primaries", pi);
+  }
 
-      return false;
-    }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Construye el ColorTransform. Llamar una vez antes del pixel loop.
+  // ─────────────────────────────────────────────────────────────────────────────
 
-    // ── Transform builders ───────────────────────────────────────────────────
+  inline ColorTransform buildTransform(int curveIn, int whiteIn, int primIn, int curveOut,
+                                       int whiteOut, int primOut, int bradfordFlag = 0)
+  {
+    ColorTransform xf;
+    xf.curveIn = curveIn;
+    xf.whiteIn = whiteIn;
+    xf.primIn = primIn;
+    xf.curveOut = curveOut;
+    xf.whiteOut = whiteOut;
+    xf.primOut = primOut;
+    xf.useBradfordCAT = (bradfordFlag != 0);
+    xf.buildMatrix();
+    return xf;
+  }
 
-    /// in -> out.  Call once before the pixel loop.
-    ColorTransform buildTransform() const
-    {
-      ColorTransform xf;
-      xf.curveIn = out_.curveIndex();  // encoded->linear uses out curve
-      xf.whiteIn = in_.whitepointIndex();
-      xf.primIn = in_.primaryIndex();
-      xf.curveOut = in_.curveIndex();  // linear->encoded uses in curve
-      xf.whiteOut = out_.whitepointIndex();
-      xf.primOut = out_.primaryIndex();
-      xf.useBradfordCAT = (bradford_ != 0);
-      xf.buildMatrix();
-      return xf;
-    }
-
-    /// out -> in  (inverse of buildTransform).  Call once before the pixel loop.
-    ColorTransform buildTransformInverse() const
-    {
-      ColorTransform xf;
-      xf.curveIn = in_.curveIndex();  // swap vs buildTransform
-      xf.whiteIn = out_.whitepointIndex();
-      xf.primIn = out_.primaryIndex();
-      xf.curveOut = out_.curveIndex();  // swap vs buildTransform
-      xf.whiteOut = in_.whitepointIndex();
-      xf.primOut = in_.primaryIndex();
-      xf.useBradfordCAT = (bradford_ != 0);
-      xf.buildMatrix();
-      return xf;
-    }
-
-    KnobSet& inSlot() { return in_; }
-    KnobSet& outSlot() { return out_; }
-
-   private:
-    KnobSet in_;
-    KnobSet out_;
-    int bradford_ = 0;
-    bool hideSwap_ = false;
-    bool hideBradford_ = false;
-
-    void swapKnobs(DD::Image::Op* op)
-    {
-      int ci = in_.curveIndex(), wi = in_.whitepointIndex(), pi = in_.primaryIndex();
-      int co = out_.curveIndex(), wo = out_.whitepointIndex(), po = out_.primaryIndex();
-
-      auto set = [&](const char* name, int val) {
-        DD::Image::Knob* k = op->knob(name);
-        if(k) k->set_value(val);
-      };
-
-      set("in_colorspace", co);
-      set("out_colorspace", ci);
-      set("in_illuminant", wo);
-      set("out_illuminant", wi);
-      set("in_primaries", po);
-      set("out_primaries", pi);
-    }
-  };
+  // Igual que buildTransform pero con in↔out invertidos.
+  inline ColorTransform buildTransformInverse(int curveIn, int whiteIn, int primIn, int curveOut,
+                                              int whiteOut, int primOut, int bradfordFlag = 0)
+  {
+    return buildTransform(curveOut, whiteOut, primOut, curveIn, whiteIn, primIn, bradfordFlag);
+  }
 
 }  // namespace colorspace
