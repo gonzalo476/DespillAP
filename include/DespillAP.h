@@ -47,6 +47,13 @@ static const char *const CLASS = "DespillAP";
 
 static const CurveDescription luminanceCurveDefault[] = {{"shadow", "curve 1 0"}, {0}};
 
+struct CSSlot
+{
+  int curve = Constants::COLOR_LINEAR;
+  int white = Constants::WHITE_D65;
+  int prim = Constants::PRIM_COLOR_SRGB;
+};
+
 class DespillAPIop : public Iop
 {
  public:
@@ -86,8 +93,9 @@ class DespillAPIop : public Iop
   float k_spillPick[3];
   float k_customWeight;
 
-  // colorspace
-  colorspace::KnobPair cs_;
+  // colorspace knobs
+  CSSlot csIn_, csOut_;
+  int bradford_ = 0;
 
   // hue knobs
   float k_hueOffset;
