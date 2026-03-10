@@ -230,8 +230,6 @@ int DespillAPIop::knob_changed(Knob *k)
     return 1;
   }
 
-  if(cs_.knobChanged(k, this)) return 1;
-
   knob("tile_color")->set_value(0x8b8b8bff);  // node color
   return 1;
 }
@@ -429,8 +427,10 @@ void DespillAPIop::engine(int y, int x, int r, ChannelMask channels, Row &row)
   if(writeAlphaOut) alphaOut.add(k_outputSpillChannel);
 
   // transform constructors
-  colorspace::ColorTransform xf = cs_.buildTransform();
-  colorspace::ColorTransform xfInv = cs_.buildTransformInverse();
+  auto xf = colorspace::buildTransform(csIn_.curve, csIn_.white, csIn_.prim, csOut_.curve,
+                                       csOut_.white, csOut_.prim, bradford_);
+  auto xfInv = colorspace::buildTransformInverse(csIn_.curve, csIn_.white, csIn_.prim, csOut_.curve,
+                                                 csOut_.white, csOut_.prim, bradford_);
 
   // PIXEL LOOP
 
