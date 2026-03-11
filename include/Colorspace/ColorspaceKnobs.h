@@ -2,7 +2,7 @@
  *
  * ColorspaceKnobs.h  (v2)
  *
- * Drop-in Nuke UI component. Registra knobs de colorspace como funciones libres.
+ * Drop-in Nuke UI component. Registers colorspace knobs as free functions.
  *
  *   colorspace::ColorspaceIn_knob (f, &ci, &wi, &pi);
  *   colorspace::ColorspaceOut_knob(f, &co, &wo, &po);
@@ -37,8 +37,8 @@ namespace colorspace
   }  // namespace detail
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Slot genérico — úsalo directamente si necesitas un prefijo arbitrario.
-  // Genera: {prefix}_colorspace  /  {prefix}_illuminant  /  {prefix}_primaries
+  // Generic slot — use it directly if you need an arbitrary prefix.
+  // Generates: {prefix}_colorspace  /  {prefix}_illuminant  /  {prefix}_primaries
   // ─────────────────────────────────────────────────────────────────────────────
 
   inline void ColorspaceSlot_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
@@ -63,7 +63,7 @@ namespace colorspace
     if(!visible) SetFlags(f, Knob::HIDDEN);
   }
 
-  // Slot de entrada — prefijo default "in"
+  // Input slot — default prefix "in"
   inline void ColorspaceIn_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
                                 int* primIdx, const char* prefix = "in", const char* label = "in",
                                 bool visible = true)
@@ -71,7 +71,7 @@ namespace colorspace
     ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label, visible);
   }
 
-  // Slot de salida — prefijo default "out"
+  // Output slot — default prefix "out"
   inline void ColorspaceOut_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
                                  int* primIdx, const char* prefix = "out",
                                  const char* label = "out", bool visible = true)
@@ -79,7 +79,7 @@ namespace colorspace
     ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label, visible);
   }
 
-  // Botón swap — nombre interno: "swap"
+  // Swap button — internal name: "swap"
   inline void ColorspaceSwap_knob(DD::Image::Knob_Callback f, bool visible = true)
   {
     using namespace DD::Image;
@@ -88,7 +88,7 @@ namespace colorspace
     if(!visible) SetFlags(f, Knob::HIDDEN);
   }
 
-  // Toggle Bradford — nombre interno: "bradford_matrix"
+  // Bradford toggle — internal name: "bradford_matrix"
   inline void ColorspaceBradford_knob(DD::Image::Knob_Callback f, int* bradfordFlag)
   {
     using namespace DD::Image;
@@ -99,8 +99,8 @@ namespace colorspace
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Llamar desde knob_changed(). Devuelve true si el knob pertenece a este sistema.
-  // inPrefix / outPrefix deben coincidir con los usados al registrar los slots.
+  // Call from knob_changed(). Returns true if the knob belongs to this system.
+  // inPrefix / outPrefix must match those used when registering the slots.
   // ─────────────────────────────────────────────────────────────────────────────
 
   inline bool colorspace_knob_changed(DD::Image::Knob* k, const char* inPrefix = "in",
@@ -115,7 +115,7 @@ namespace colorspace
            k->is("swap");
   }
 
-  // Intercambia los valores de los slots in↔out. Llamar cuando k->is("swap").
+  // Swaps values between in↔out slots. Call when k->is("swap").
   inline void swap_colorspace_knobs(DD::Image::Op* op, const char* inPrefix = "in",
                                     const char* outPrefix = "out")
   {
@@ -144,7 +144,7 @@ namespace colorspace
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Construye el ColorTransform. Llamar una vez antes del pixel loop.
+  // Builds the ColorTransform. Call once before the pixel loop.
   // ─────────────────────────────────────────────────────────────────────────────
 
   inline ColorTransform buildTransform(int curveIn, int whiteIn, int primIn, int curveOut,
@@ -162,7 +162,7 @@ namespace colorspace
     return xf;
   }
 
-  // Igual que buildTransform pero con in↔out invertidos.
+  // Same as buildTransform but with in↔out inverted.
   inline ColorTransform buildTransformInverse(int curveIn, int whiteIn, int primIn, int curveOut,
                                               int whiteOut, int primOut, int bradfordFlag = 0)
   {
