@@ -54,7 +54,7 @@ DespillAPIop::DespillAPIop(Node *node) : Iop(node)
 
   _returnColor = 0;
 
-  // colorspace::KnobPair cs_;
+  k_useColorspaceIn = false;
 }
 
 void DespillAPIop::knobs(Knob_Callback f)
@@ -83,11 +83,15 @@ void DespillAPIop::knobs(Knob_Callback f)
   SetFlags(f, Knob::DISABLED);
   Tooltip(f, "Custom weight for despill calculation. Only active when Math is set to Custom");
 
+  // ---------------- Colorspace ----------------
   Divider(f, "<b>Colorspace</b>");
-  colorspace::ColorspaceOut_knob(f, &csIn_.curve, &csIn_.white, &csIn_.prim);
+  Bool_knob(f, &k_useColorspaceIn, "use_colorspace_in", "colorspace in");
+  colorspace::ColorspaceIn_knob(f, &csIn_.curve, &csIn_.white, &csIn_.prim, "in", "in", false);
+  colorspace::ColorspaceOut_knob(f, &csOut_.curve, &csOut_.white, &csOut_.prim);
+  colorspace::ColorspaceSwap_knob(f, false);
 
+  // ---------------- Hue ----------------
   Divider(f, "<b>Hue</b>");
-
   Float_knob(f, &k_hueOffset, IRange(-30, 30), "hue_offset", "offset");
   Tooltip(f,
           "Fine-tune hue angle in degrees. Added to automatic shift from picked color, or used "
@@ -144,6 +148,7 @@ void DespillAPIop::knobs(Knob_Callback f)
 
   EndGroup(f);
 
+  // ---------------- Respill ----------------
   Divider(f, "<b>Respill</b>");
 
   Enumeration_knob(f, &k_respillMath, Constants::RESPILL_MATH_TYPES, "respill_math", "math");
@@ -158,6 +163,7 @@ void DespillAPIop::knobs(Knob_Callback f)
   Range_knob(f, _luminance, 2, "luma_range", "range");
   SetRange(f, 0.0, 1.0);
 
+  // ---------------- Output ----------------
   Divider(f, "<b>Output</b>");
 
   Enumeration_knob(f, &k_outputType, Constants::OUTPUT_TYPES, "output_despill", "output");
@@ -228,6 +234,27 @@ int DespillAPIop::knob_changed(Knob *k)
       protectPreview_knob->disable();
     }
     return 1;
+  }
+
+  if(k->is("use_colorspace_in")) {
+    Knob *useColorspaceInKnob = k->knob("use_colorspace_in");
+    Knob *colorspaceInKnob = k->knob("in_colorspace");
+    Knob *illuminantInKnob = k->knob("in_illuminant");
+    Knob *primariesInKnob = k->knob("in_primaries");
+    Knob *swapKnob = k->knob("swap");
+
+    if(useColorspaceInKnob->get_value() == 1) {
+      colorspaceInKnob->visible(true);
+      illuminantInKnob->visible(true);
+      primariesInKnob->visible(true);
+      swapKnob->visible(true);
+    }
+    else {
+      colorspaceInKnob->visible(false);
+      illuminantInKnob->visible(false);
+      primariesInKnob->visible(false);
+      swapKnob->visible(false);
+    }
   }
 
   knob("tile_color")->set_value(0x8b8b8bff);  // node color
