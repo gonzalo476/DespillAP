@@ -121,6 +121,7 @@ void DespillAPIop::knobs(Knob_Callback f)
       f,
       "Preview protection matte. Shows protected areas multiplied by protection effect strength");
 
+  // ---------------- Protect Tones ----------------
   BeginGroup(f, "Protect Tones");
   SetFlags(f, Knob::CLOSED);
 
