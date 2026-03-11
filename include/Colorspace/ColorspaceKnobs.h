@@ -42,44 +42,50 @@ namespace colorspace
   // ─────────────────────────────────────────────────────────────────────────────
 
   inline void ColorspaceSlot_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
-                                  int* primIdx, const char* prefix, const char* label)
+                                  int* primIdx, const char* prefix, const char* label,
+                                  bool visible = true)
   {
     using namespace DD::Image;
 
     Enumeration_knob(f, curveIdx, Constants::COLOR_CURVE, detail::kname(prefix, "colorspace"),
                      label);
     Tooltip(f, "Transfer curve / encoding");
+    if(!visible) SetFlags(f, Knob::HIDDEN);
 
     Enumeration_knob(f, whiteIdx, Constants::WHITEPOINT, detail::kname(prefix, "illuminant"), "");
     Tooltip(f, "Whitepoint (illuminant)");
     ClearFlags(f, Knob::STARTLINE);
+    if(!visible) SetFlags(f, Knob::HIDDEN);
 
     Enumeration_knob(f, primIdx, Constants::PRIMARY_RGB, detail::kname(prefix, "primaries"), "");
     Tooltip(f, "RGB primaries");
     ClearFlags(f, Knob::STARTLINE);
+    if(!visible) SetFlags(f, Knob::HIDDEN);
   }
 
   // Slot de entrada — prefijo default "in"
   inline void ColorspaceIn_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
-                                int* primIdx, const char* prefix = "in", const char* label = "in")
+                                int* primIdx, const char* prefix = "in", const char* label = "in",
+                                bool visible = true)
   {
-    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label);
+    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label, visible);
   }
 
   // Slot de salida — prefijo default "out"
   inline void ColorspaceOut_knob(DD::Image::Knob_Callback f, int* curveIdx, int* whiteIdx,
                                  int* primIdx, const char* prefix = "out",
-                                 const char* label = "out")
+                                 const char* label = "out", bool visible = true)
   {
-    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label);
+    ColorspaceSlot_knob(f, curveIdx, whiteIdx, primIdx, prefix, label, visible);
   }
 
-  // Botón swap — nombre interno: "cs_swap"
-  inline void ColorspaceSwap_knob(DD::Image::Knob_Callback f)
+  // Botón swap — nombre interno: "swap"
+  inline void ColorspaceSwap_knob(DD::Image::Knob_Callback f, bool visible = true)
   {
     using namespace DD::Image;
-    Button(f, "cs_swap", "swap in/out");
+    Button(f, "swap", "swap in/out");
     SetFlags(f, Knob::STARTLINE);
+    if(!visible) SetFlags(f, Knob::HIDDEN);
   }
 
   // Toggle Bradford — nombre interno: "bradford_matrix"
@@ -106,10 +112,10 @@ namespace colorspace
            k->is(detail::kname(outPrefix, "colorspace")) ||
            k->is(detail::kname(outPrefix, "illuminant")) ||
            k->is(detail::kname(outPrefix, "primaries")) || k->is("bradford_matrix") ||
-           k->is("cs_swap");
+           k->is("swap");
   }
 
-  // Intercambia los valores de los slots in↔out. Llamar cuando k->is("cs_swap").
+  // Intercambia los valores de los slots in↔out. Llamar cuando k->is("swap").
   inline void swap_colorspace_knobs(DD::Image::Op* op, const char* inPrefix = "in",
                                     const char* outPrefix = "out")
   {
